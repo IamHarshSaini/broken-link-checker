@@ -11,26 +11,33 @@ function shouldVisit(url, options) {
   if (!options) return true;
 
   const {
-    includeStartsWith = [],
-    excludeStartsWith = [],
-    includeIncludes = [],
-    excludeIncludes = [],
+    urlStartsWith = [],
+    urlNotStartsWith = [],
+    urlIncludes = [],
+    urlExclude = [],
   } = options;
 
-  // ❌ exclude startsWith
-  if (excludeStartsWith.some((p) => url.startsWith(p))) return false;
-
-  // ❌ exclude includes
-  if (excludeIncludes.some((p) => url.includes(p))) return false;
-
-  // ✅ include startsWith
-  if (includeStartsWith.length > 0) {
-    if (!includeStartsWith.some((p) => url.startsWith(p))) return false;
+  // ❌ reject if starts with excluded prefixes
+  if (urlNotStartsWith.some((p) => url.startsWith(p))) {
+    return false;
   }
 
-  // ✅ include includes
-  if (includeIncludes.length > 0) {
-    if (!includeIncludes.some((p) => url.includes(p))) return false;
+  // ❌ reject if includes excluded text
+  if (urlExclude.some((p) => url.includes(p))) {
+    return false;
+  }
+
+  // ✅ allow only matching startsWith
+  if (
+    urlStartsWith.length > 0 &&
+    !urlStartsWith.some((p) => url.startsWith(p))
+  ) {
+    return false;
+  }
+
+  // ✅ allow only matching includes
+  if (urlIncludes.length > 0 && !urlIncludes.some((p) => url.includes(p))) {
+    return false;
   }
 
   return true;
