@@ -1,23 +1,23 @@
 import { runCrawler } from "@/lib/crawler";
-import { crawlerControl } from "@/lib/controller";
+import { createScan } from "@/lib/scanStore";
 
 export async function POST(req) {
   try {
-    const { url, options } = await req.json();
+    const { url, options, scanId } = await req.json();
 
-    if (!url) {
-      return Response.json({ error: "URL required" }, { status: 400 });
+    if (!url || !scanId) {
+      return Response.json({ error: "url + scanId required" }, { status: 400 });
     }
 
-    // reset control
-    crawlerControl.paused = false;
-    crawlerControl.stopped = false;
+    createScan(scanId, url);
 
-    runCrawler(url, options);
+    runCrawler(url, scanId, options);
 
-    return Response.json({ started: true });
+    return Response.json({
+      started: true,
+      scanId,
+    });
   } catch (err) {
-    console.error(err);
     return Response.json({ error: "Internal error" }, { status: 500 });
   }
 }
