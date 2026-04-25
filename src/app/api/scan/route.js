@@ -3,13 +3,13 @@ import { createScan } from "@/lib/scanStore";
 
 export async function POST(req) {
   try {
-    const { url, options, scanId } = await req.json();
+    const { url, options = {}, scanId } = await req.json();
 
     if (!url || !scanId) {
       return Response.json({ error: "url + scanId required" }, { status: 400 });
     }
 
-    createScan(scanId, url);
+    createScan(scanId, url, options);
 
     runCrawler(url, scanId, options);
 

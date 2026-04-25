@@ -6,7 +6,7 @@ import { getScan, updateScan, addBroken, finishScan } from "./scanStore";
 
 import { broadcastToScan } from "./ws";
 
-const limit = pLimit(100);
+const limit = pLimit(25);
 
 function shouldVisit(url, options) {
   if (!options) return true;
@@ -68,8 +68,6 @@ export async function runCrawler(startUrl, scanId, options = {}) {
     if (!shouldVisit(page, options)) continue;
 
     visitedPages.add(page);
-
-    console.log("scanId", scanId);
 
     updateScan(scanId, {
       checked,

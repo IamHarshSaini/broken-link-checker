@@ -73,6 +73,23 @@ export default function Home() {
 
         if (!data) return;
 
+        setUrl(data.url || "");
+
+        setSitemap(Boolean(data.options?.sitemap));
+
+        delete data.options.sitemap;
+
+        setFilters((prev) =>
+          prev.map((x) => {
+            const { key } = x;
+            if (data?.options?.[key]) {
+              return { ...x, [key]: data.options[key] };
+            } else {
+              return x;
+            }
+          }),
+        );
+
         setChecked(data.checked || 0);
         setCurrentPage(data.currentPage || "");
         setBrokenLinks(data.brokenLinks || []);
@@ -173,7 +190,7 @@ export default function Home() {
     let path = row.source;
 
     try {
-      const u = new URL(row.source);
+      const u = new URL(row.url);
       path = u.pathname + u.search;
     } catch {}
 
@@ -442,6 +459,7 @@ export default function Home() {
             rowsPerPageOptions={[5, 10, 15, 20, 25, 50]}
           >
             <Column
+              filter
               field="url"
               body={urlBody}
               header="🔗 URL"

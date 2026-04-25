@@ -1,9 +1,11 @@
 export const scanStore = new Map();
 
-export function createScan(scanId, url) {
+export function createScan(scanId, url, options) {
   scanStore.set(scanId, {
     scanId,
     url,
+    options,
+
     checked: 0,
     currentPage: "",
     brokenLinks: [],
