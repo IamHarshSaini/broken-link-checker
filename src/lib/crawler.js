@@ -3,10 +3,9 @@ import * as cheerio from "cheerio";
 import pLimit from "p-limit";
 
 import { getScan, updateScan, addBroken, finishScan } from "./scanStore";
-
 import { broadcastToScan } from "./ws";
 
-const limit = pLimit(25);
+const limit = pLimit(100);
 
 function shouldVisit(url, options) {
   if (!options) return true;
@@ -40,13 +39,66 @@ function shouldVisit(url, options) {
   return true;
 }
 
+async function getSitemapUrls(startUrl, options = {}) {
+  const visitedSitemaps = new Set();
+  const finalUrls = new Set();
+
+  // use exact incoming URL only
+  const rootSitemap = startUrl;
+
+  async function crawlSitemap(sitemapUrl) {
+    if (visitedSitemaps.has(sitemapUrl)) return;
+    visitedSitemaps.add(sitemapUrl);
+
+    try {
+      const res = await axios.get(sitemapUrl, {
+        timeout: 10000,
+      });
+
+      const xml = res.data;
+
+      const sitemapMatches = [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) =>
+        m[1]?.trim(),
+      );
+
+      for (const loc of sitemapMatches) {
+        if (!loc) continue;
+
+        if (
+          loc.includes("sitemap") &&
+          (loc.endsWith(".xml") || loc.includes(".xml?"))
+        ) {
+          await crawlSitemap(loc);
+        } else {
+          if (shouldVisit(loc, options)) {
+            finalUrls.add(loc);
+          }
+        }
+      }
+    } catch (err) {
+      console.log("sitemap read failed:", sitemapUrl);
+    }
+  }
+
+  await crawlSitemap(rootSitemap);
+
+  return [...finalUrls];
+}
+
 export async function runCrawler(startUrl, scanId, options = {}) {
-  const visitedPages = new Set();
   const checkedLinks = new Set();
-  const queue = [startUrl];
+  const visitedPages = new Set();
+
+  let queue = [];
+  let checked = 0;
 
   const baseHost = new URL(startUrl).host;
-  let checked = 0;
+
+  if (options?.sitemap) {
+    queue = await getSitemapUrls(startUrl, options);
+  } else {
+    queue = [startUrl];
+  }
 
   while (queue.length) {
     const scan = getScan(scanId);
@@ -83,7 +135,10 @@ export async function runCrawler(startUrl, scanId, options = {}) {
     let html = "";
 
     try {
-      const res = await axios.get(page);
+      const res = await axios.get(page, {
+        timeout: 10000,
+      });
+
       html = res.data;
     } catch {
       continue;
@@ -110,10 +165,15 @@ export async function runCrawler(startUrl, scanId, options = {}) {
 
             try {
               const res = await axios.head(link, {
+                timeout: 8000,
                 validateStatus: () => true,
               });
 
               checked++;
+
+              updateScan(scanId, {
+                checked,
+              });
 
               if (res.status >= 400) {
                 const broken = {
@@ -132,6 +192,10 @@ export async function runCrawler(startUrl, scanId, options = {}) {
             } catch {
               checked++;
 
+              updateScan(scanId, {
+                checked,
+              });
+
               const broken = {
                 url: link,
                 status: "ERROR",
@@ -147,17 +211,19 @@ export async function runCrawler(startUrl, scanId, options = {}) {
             }
           }
 
-          try {
-            const host = new URL(link).host;
+          if (!options?.sitemap) {
+            try {
+              const host = new URL(link).host;
 
-            if (
-              host === baseHost &&
-              !visitedPages.has(link) &&
-              shouldVisit(link, options)
-            ) {
-              queue.push(link);
-            }
-          } catch {}
+              if (
+                host === baseHost &&
+                !visitedPages.has(link) &&
+                shouldVisit(link, options)
+              ) {
+                queue.push(link);
+              }
+            } catch {}
+          }
         }),
       ),
     );

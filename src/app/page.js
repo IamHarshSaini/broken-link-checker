@@ -25,6 +25,16 @@ export default function Home() {
   const [scanIdReady, setScanIdReady] = useState(false);
   const [modalVisible, setFilterModalVisible] = useState(false);
 
+  const siteDomain = useMemo(() => {
+    if (!url) return "";
+    try {
+      const u = new URL(url);
+      return u.origin;
+    } catch {
+      return "";
+    }
+  }, [url]);
+
   const [filters, setFilters] = useState([
     {
       key: "urlIncludes",
@@ -178,7 +188,7 @@ export default function Home() {
 
     return (
       <span
-        className="text-blue-600 cursor-pointer hover:underline"
+        className="text-blue-600 break-all cursor-pointer hover:underline"
         onClick={() => navigator.clipboard.writeText(path)}
       >
         {path}
@@ -298,107 +308,6 @@ export default function Home() {
     );
   };
 
-  const TableHeader = () => {
-    return (
-      <header className="flex gap-4 bg-white flex-wrap">
-        {loading ? (
-          <div className="flex px-4 items-center grow border rounded min-w-[300px]">
-            <span className="font-medium">{currentPage.replace(url, "")}</span>
-          </div>
-        ) : (
-          <InputText
-            value={url}
-            disabled={loading}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com"
-            className="flex-1 min-w-[300px]"
-          />
-        )}
-
-        <Button
-          outlined
-          label="Filters"
-          disabled={loading}
-          icon="pi pi-filter"
-          onClick={() => setFilterModalVisible(true)}
-        />
-
-        <Button
-          loading={loading}
-          disabled={loading}
-          onClick={startScan}
-          className="w-36"
-          label={loading ? "Scanning" : "Scan"}
-        />
-
-        {loading && (
-          <>
-            <ToggleButton
-              checked={isPaused}
-              disabled={!loading}
-              onLabel="Resume Scan"
-              offLabel="Pause Scan"
-              onIcon="pi pi-play"
-              offIcon="pi pi-pause"
-              onChange={async (e) => {
-                const paused = e.value;
-                setIsPaused(paused);
-                await fetch("/api/control", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                  },
-                  body: JSON.stringify({
-                    action: paused ? "resume" : "pause",
-                    scanId: scanIdRef.current,
-                  }),
-                });
-              }}
-            />
-
-            <Button
-              severity="danger"
-              outlined
-              label="Stop"
-              icon="pi pi-stop"
-              onClick={stopScan}
-              disabled={!loading}
-            />
-          </>
-        )}
-
-        {done && (
-          <Button
-            outlined
-            label="Reset"
-            severity="danger"
-            icon="pi pi-reset"
-            onClick={resetScan}
-          />
-        )}
-
-        {!loading && !done && (
-          <ToggleButton
-            checked={sitemap}
-            disabled={loading}
-            onLabel="🗺️ Scan from Sitemap"
-            offLabel="🌐 Crawl Website Pages"
-            onChange={(e) => setSitemap(e.value)}
-          />
-        )}
-
-        {brokenLinks?.length > 0 && (
-          <Button
-            outlined
-            className="w-36"
-            label="Download"
-            icon="pi pi-download"
-          />
-        )}
-      </header>
-    );
-  };
-
   return (
     <>
       <div className="grid grid-cols-[280px_1fr] min-h-screen bg-linear-to-br from-slate-50 to-blue-50">
@@ -454,7 +363,106 @@ export default function Home() {
             size="small"
             scrollHeight="flex"
             value={brokenLinks}
-            header={<TableHeader />}
+            header={
+              <header className="flex gap-4 bg-white flex-wrap">
+                {loading ? (
+                  <div className="flex px-4 items-center grow border rounded min-w-[300px]">
+                    <span className="font-medium">
+                      {currentPage.replace(siteDomain, "")}
+                    </span>
+                  </div>
+                ) : (
+                  <InputText
+                    value={url}
+                    disabled={loading}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="https://example.com"
+                    className="flex-1 min-w-[300px]"
+                  />
+                )}
+
+                <Button
+                  outlined
+                  label="Filters"
+                  disabled={loading}
+                  icon="pi pi-filter"
+                  onClick={() => setFilterModalVisible(true)}
+                />
+
+                <Button
+                  loading={loading}
+                  disabled={loading}
+                  onClick={startScan}
+                  className="w-36"
+                  label={loading ? "Scanning" : "Scan"}
+                />
+
+                {loading && (
+                  <>
+                    <ToggleButton
+                      checked={isPaused}
+                      disabled={!loading}
+                      onLabel="Resume Scan"
+                      offLabel="Pause Scan"
+                      onIcon="pi pi-play"
+                      offIcon="pi pi-pause"
+                      onChange={async (e) => {
+                        const paused = e.value;
+                        setIsPaused(paused);
+                        await fetch("/api/control", {
+                          method: "POST",
+                          headers: {
+                            "Content-Type": "application/json",
+                          },
+                          body: JSON.stringify({
+                            action: paused ? "resume" : "pause",
+                            scanId: scanIdRef.current,
+                          }),
+                        });
+                      }}
+                    />
+
+                    <Button
+                      severity="danger"
+                      outlined
+                      label="Stop"
+                      icon="pi pi-stop"
+                      onClick={stopScan}
+                      disabled={!loading}
+                    />
+                  </>
+                )}
+
+                {done && (
+                  <Button
+                    outlined
+                    label="Reset"
+                    severity="danger"
+                    icon="pi pi-reset"
+                    onClick={resetScan}
+                  />
+                )}
+
+                {!loading && !done && (
+                  <ToggleButton
+                    checked={sitemap}
+                    disabled={loading}
+                    onLabel="🗺️ Scan from Sitemap"
+                    offLabel="🌐 Crawl Website Pages"
+                    onChange={(e) => setSitemap(e.value)}
+                  />
+                )}
+
+                {brokenLinks?.length > 0 && (
+                  <Button
+                    outlined
+                    className="w-36"
+                    label="Download"
+                    icon="pi pi-download"
+                  />
+                )}
+              </header>
+            }
             emptyMessage="No broken links found"
             rowsPerPageOptions={[5, 10, 15, 20, 25, 50]}
           >
@@ -462,13 +470,28 @@ export default function Home() {
               filter
               field="url"
               body={urlBody}
-              header="🔗 URL"
+              header={() => {
+                return <div className="text-nowrap">🔗 URL</div>;
+              }}
               filterPlaceholder="Search URL"
             />
 
-            <Column field="status" header="📌 Status" sortable filter />
+            <Column
+              field="status"
+              header={() => {
+                return <div className="text-nowrap">📌 Status</div>;
+              }}
+              sortable
+              filter
+            />
 
-            <Column field="source" header="🌍 Source" body={sourceBody} />
+            <Column
+              field="source"
+              header={() => {
+                return <div className="text-nowrap">🌍 Source</div>;
+              }}
+              body={sourceBody}
+            />
           </DataTable>
         </div>
       </div>
