@@ -389,7 +389,7 @@ export default function Home() {
             header={
               <header className="flex gap-4 bg-white">
                 {loading ? (
-                  <div className="flex px-4 items-center w-[400px] border rounded overflow-hidden">
+                  <div className="flex px-4 items-center w-96.25 border rounded overflow-hidden">
                     <span className="font-medium whitespace-nowrap overflow-hidden text-ellipsis block">
                       {currentPage.replace(siteDomain, "")}
                     </span>
@@ -400,7 +400,7 @@ export default function Home() {
                     disabled={loading}
                     onChange={(e) => setUrl(e.target.value)}
                     placeholder="https://example.com"
-                    className="flex-1 min-w-[300px]"
+                    className="flex-1 min-w-75"
                   />
                 )}
 
@@ -429,6 +429,7 @@ export default function Home() {
                       offLabel="Pause Scan"
                       onIcon="pi pi-play"
                       offIcon="pi pi-pause"
+                      className="text-nowrap"
                       onChange={async (e) => {
                         const paused = e.value;
                         setIsPaused(paused);
