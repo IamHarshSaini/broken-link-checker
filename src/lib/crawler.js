@@ -3,6 +3,7 @@ import * as cheerio from "cheerio";
 import pLimit from "p-limit";
 
 import { getScan, updateScan, addBroken, finishScan } from "./scanStore";
+
 import { broadcastToScan } from "./ws";
 
 const limit = pLimit(100);
@@ -17,14 +18,17 @@ function shouldVisit(url, options) {
     urlExclude = [],
   } = options;
 
+  // exclude startsWith
   if (urlNotStartsWith.some((p) => url.startsWith(p))) {
     return false;
   }
 
+  // exclude includes
   if (urlExclude.some((p) => url.includes(p))) {
     return false;
   }
 
+  // include only startsWith
   if (
     urlStartsWith.length > 0 &&
     !urlStartsWith.some((p) => url.startsWith(p))
@@ -32,6 +36,7 @@ function shouldVisit(url, options) {
     return false;
   }
 
+  // include only includes
   if (urlIncludes.length > 0 && !urlIncludes.some((p) => url.includes(p))) {
     return false;
   }
@@ -39,11 +44,18 @@ function shouldVisit(url, options) {
   return true;
 }
 
+/**
+ * recursive sitemap parser
+ * supports:
+ * - sitemap.xml
+ * - sitemap index
+ * - nested sitemap index
+ */
 async function getSitemapUrls(startUrl, options = {}) {
   const visitedSitemaps = new Set();
   const finalUrls = new Set();
 
-  // use exact incoming URL only
+  // use exact incoming sitemap URL
   const rootSitemap = startUrl;
 
   async function crawlSitemap(sitemapUrl) {
@@ -64,6 +76,7 @@ async function getSitemapUrls(startUrl, options = {}) {
       for (const loc of sitemapMatches) {
         if (!loc) continue;
 
+        // recursive nested sitemap support
         if (
           loc.includes("sitemap") &&
           (loc.endsWith(".xml") || loc.includes(".xml?"))
@@ -86,14 +99,21 @@ async function getSitemapUrls(startUrl, options = {}) {
 }
 
 export async function runCrawler(startUrl, scanId, options = {}) {
-  const checkedLinks = new Set();
+  const checkedLinksSet = new Set();
   const visitedPages = new Set();
 
   let queue = [];
-  let checked = 0;
+
+  // separate counters
+  let checkedPages = 0;
+  let checkedLinks = 0;
 
   const baseHost = new URL(startUrl).host;
 
+  /**
+   * if sitemap=true
+   * use only sitemap URLs
+   */
   if (options?.sitemap) {
     queue = await getSitemapUrls(startUrl, options);
   } else {
@@ -106,10 +126,12 @@ export async function runCrawler(startUrl, scanId, options = {}) {
     if (!scan) break;
     if (scan.stopped) break;
 
+    // pause handling
     while (scan.paused) {
       await new Promise((r) => setTimeout(r, 500));
 
       const latest = getScan(scanId);
+
       if (!latest || latest.stopped) break;
     }
 
@@ -121,14 +143,19 @@ export async function runCrawler(startUrl, scanId, options = {}) {
 
     visitedPages.add(page);
 
+    // page checked
+    checkedPages++;
+
     updateScan(scanId, {
-      checked,
+      checkedPages,
+      checkedLinks,
       currentPage: page,
     });
 
     broadcastToScan(scanId, {
       type: "progress",
-      checked,
+      checkedPages,
+      checkedLinks,
       currentPage: page,
     });
 
@@ -147,21 +174,36 @@ export async function runCrawler(startUrl, scanId, options = {}) {
     const $ = cheerio.load(html);
     const links = [];
 
+    /**
+     * capture:
+     * - link URL
+     * - anchor text
+     */
     $("a[href]").each((_, el) => {
       const href = $(el).attr("href");
-
       if (!href || href.startsWith("#")) return;
-
       try {
-        links.push(new URL(href, page).href);
+        const text = $(el)
+          .contents()
+          .filter((_, node) => node.type === "text")
+          .text()
+          .trim();
+
+        links.push({
+          url: new URL(href, page).href,
+          text,
+        });
       } catch {}
     });
 
     await Promise.all(
-      links.map((link) =>
+      links.map((item) =>
         limit(async () => {
-          if (!checkedLinks.has(link)) {
-            checkedLinks.add(link);
+          const link = item.url;
+          const linkText = item.text || "";
+
+          if (!checkedLinksSet.has(link)) {
+            checkedLinksSet.add(link);
 
             try {
               const res = await axios.head(link, {
@@ -169,15 +211,18 @@ export async function runCrawler(startUrl, scanId, options = {}) {
                 validateStatus: () => true,
               });
 
-              checked++;
+              // link checked
+              checkedLinks++;
 
               updateScan(scanId, {
-                checked,
+                checkedPages,
+                checkedLinks,
               });
 
               if (res.status >= 400) {
                 const broken = {
                   url: link,
+                  text: linkText, // anchor text
                   status: res.status,
                   source: page,
                 };
@@ -190,14 +235,16 @@ export async function runCrawler(startUrl, scanId, options = {}) {
                 });
               }
             } catch {
-              checked++;
+              checkedLinks++;
 
               updateScan(scanId, {
-                checked,
+                checkedPages,
+                checkedLinks,
               });
 
               const broken = {
                 url: link,
+                text: linkText, // anchor text
                 status: "ERROR",
                 source: page,
               };
@@ -211,6 +258,9 @@ export async function runCrawler(startUrl, scanId, options = {}) {
             }
           }
 
+          /**
+           * only normal crawl when sitemap=false
+           */
           if (!options?.sitemap) {
             try {
               const host = new URL(link).host;

@@ -6,7 +6,9 @@ export function createScan(scanId, url, options) {
     url,
     options,
 
-    checked: 0,
+    checkedPages: 0,
+    checkedLinks: 0,
+
     currentPage: "",
     brokenLinks: [],
     done: false,

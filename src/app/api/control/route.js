@@ -10,31 +10,44 @@ export async function POST(req) {
       return Response.json({ error: "scan not found" }, { status: 404 });
     }
 
+    // pause
     if (action === "pause") {
       scan.paused = true;
     }
 
+    // resume
     if (action === "resume") {
       scan.paused = false;
     }
 
+    // stop
     if (action === "stop") {
       scan.stopped = true;
       scan.paused = false;
+      scan.loading = false;
     }
 
+    // reset
     if (action === "reset") {
-      scan.checked = 0;
+      scan.checkedPages = 0;
+      scan.checkedLinks = 0;
+
       scan.currentPage = "";
       scan.brokenLinks = [];
+
       scan.done = false;
       scan.loading = false;
+
       scan.paused = false;
       scan.stopped = false;
+
+      scan.createdAt = Date.now();
     }
 
     return Response.json({ ok: true });
-  } catch {
+  } catch (err) {
+    console.error(err);
+
     return Response.json({ error: "Internal error" }, { status: 500 });
   }
 }

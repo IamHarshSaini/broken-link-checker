@@ -15,7 +15,11 @@ export default function Home() {
 
   const [url, setUrl] = useState("");
   const [done, setDone] = useState(false);
-  const [checked, setChecked] = useState(0);
+
+  // UPDATED
+  const [checkedPages, setCheckedPages] = useState(0);
+  const [checkedLinks, setCheckedLinks] = useState(0);
+
   const [sitemap, setSitemap] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -27,6 +31,7 @@ export default function Home() {
 
   const siteDomain = useMemo(() => {
     if (!url) return "";
+
     try {
       const u = new URL(url);
       return u.origin;
@@ -84,23 +89,23 @@ export default function Home() {
         if (!data) return;
 
         setUrl(data.url || "");
-
         setSitemap(Boolean(data.options?.sitemap));
 
-        delete data.options.sitemap;
+        const restoredOptions = { ...(data.options || {}) };
+        delete restoredOptions.sitemap;
 
+        // FIXED
         setFilters((prev) =>
-          prev.map((x) => {
-            const { key } = x;
-            if (data?.options?.[key]) {
-              return { ...x, [key]: data.options[key] };
-            } else {
-              return x;
-            }
-          }),
+          prev.map((item) => ({
+            ...item,
+            value: restoredOptions[item.key] || [],
+          })),
         );
 
-        setChecked(data.checked || 0);
+        // UPDATED
+        setCheckedPages(data.checkedPages || 0);
+        setCheckedLinks(data.checkedLinks || 0);
+
         setCurrentPage(data.currentPage || "");
         setBrokenLinks(data.brokenLinks || []);
         setDone(Boolean(data.done));
@@ -125,22 +130,19 @@ export default function Home() {
       `ws://localhost:3000/ws?scanId=${scanIdRef.current}`,
     );
 
-    // connection opened
     ws.onopen = () => {
       console.log("✅ WS Connected:", scanIdRef.current);
     };
 
-    // incoming messages
     ws.onmessage = (event) => {
-      console.log("WS message:", event.data);
-
       const msg = JSON.parse(event.data);
 
-      // ignore messages from other scans/tabs
       if (msg.scanId !== scanIdRef.current) return;
 
       if (msg.type === "progress") {
-        setChecked(msg.checked || 0);
+        // UPDATED
+        setCheckedPages(msg.checkedPages || 0);
+        setCheckedLinks(msg.checkedLinks || 0);
         setCurrentPage(msg.currentPage || "");
       }
 
@@ -155,28 +157,27 @@ export default function Home() {
       }
     };
 
-    // websocket error
     ws.onerror = (err) => {
       console.error("❌ WS Error:", err);
     };
 
-    // websocket closed
     ws.onclose = () => {
       console.log("❌ WS Closed");
     };
 
-    // cleanup
     return () => {
       ws.close();
     };
   }, [scanIdReady]);
 
-  // speed
+  // UPDATED → speed should use checkedLinks
   const speed = useMemo(() => {
     if (!startTime) return 0;
+
     const seconds = (Date.now() - startTime) / 1000;
-    return seconds ? (checked / seconds).toFixed(1) : 0;
-  }, [checked, startTime]);
+
+    return seconds ? (checkedLinks / seconds).toFixed(1) : 0;
+  }, [checkedLinks, startTime]);
 
   const urlBody = (row) => {
     let path = row.url;
@@ -197,19 +198,12 @@ export default function Home() {
   };
 
   const sourceBody = (row) => {
-    let path = row.source;
-
-    try {
-      const u = new URL(row.url);
-      path = u.pathname + u.search;
-    } catch {}
-
     return (
       <span
         className="text-blue-600 cursor-pointer hover:underline"
         title="Click to copy and open"
         onClick={() => {
-          navigator.clipboard.writeText(path);
+          navigator.clipboard.writeText(row.text);
           window.open(row.source, "_blank", "noopener,noreferrer");
         }}
       >
@@ -222,7 +216,11 @@ export default function Home() {
   const startScan = async () => {
     try {
       setLoading(true);
-      setChecked(0);
+
+      // UPDATED
+      setCheckedPages(0);
+      setCheckedLinks(0);
+
       setCurrentPage("");
       setBrokenLinks([]);
       setDone(false);
@@ -254,9 +252,9 @@ export default function Home() {
     }
   };
 
-  // stop
   const stopScan = async () => {
     setIsPaused(false);
+
     await fetch("/api/control", {
       method: "POST",
       headers: {
@@ -274,7 +272,6 @@ export default function Home() {
   const resetScan = async () => {
     if (!scanIdRef.current) return;
 
-    // optional backend reset call (recommended)
     await fetch("/api/control", {
       method: "POST",
       headers: {
@@ -286,7 +283,10 @@ export default function Home() {
       }),
     });
 
-    setChecked(0);
+    // UPDATED
+    setCheckedPages(0);
+    setCheckedLinks(0);
+
     setCurrentPage("");
     setBrokenLinks([]);
     setDone(false);
@@ -310,14 +310,19 @@ export default function Home() {
 
   return (
     <>
-      <div className="grid grid-cols-[280px_1fr] min-h-screen bg-linear-to-br from-slate-50 to-blue-50">
+      <div className="grid grid-cols-[280px_1fr] bg-linear-to-br from-slate-50 to-blue-50">
         {/* Sidebar */}
         <div className="flex flex-col gap-4 p-5 sticky top-0 border-r bg-white/80 backdrop-blur-md">
           {[
             {
-              label: "Checked",
-              value: checked,
-              emoji: "🔍",
+              label: "Pages Checked",
+              value: checkedPages,
+              emoji: "📄",
+            },
+            {
+              label: "Links Checked",
+              value: checkedLinks,
+              emoji: "🔗",
             },
             {
               label: "Speed",
@@ -337,7 +342,7 @@ export default function Home() {
           ].map((item, i) => (
             <div
               key={i}
-              className="bg-white border border-slate-200 p-5 rounded"
+              className="bg-white border border-slate-200 p-3 rounded"
             >
               <div className="flex items-center justify-between">
                 <p className="text-sm text-gray-500 font-medium">
@@ -366,8 +371,8 @@ export default function Home() {
             header={
               <header className="flex gap-4 bg-white flex-wrap">
                 {loading ? (
-                  <div className="flex px-4 items-center grow border rounded min-w-[300px]">
-                    <span className="font-medium">
+                  <div className="flex px-4 items-center grow border rounded max-w-[400px] overflow-hidden">
+                    <span className="font-medium whitespace-nowrap overflow-hidden text-ellipsis block">
                       {currentPage.replace(siteDomain, "")}
                     </span>
                   </div>
@@ -409,6 +414,7 @@ export default function Home() {
                       onChange={async (e) => {
                         const paused = e.value;
                         setIsPaused(paused);
+
                         await fetch("/api/control", {
                           method: "POST",
                           headers: {
@@ -474,6 +480,14 @@ export default function Home() {
                 return <div className="text-nowrap">🔗 URL</div>;
               }}
               filterPlaceholder="Search URL"
+            />
+
+            {/* NEW */}
+            <Column
+              field="text"
+              header={() => {
+                return <div className="text-nowrap">📝 Anchor Text</div>;
+              }}
             />
 
             <Column
