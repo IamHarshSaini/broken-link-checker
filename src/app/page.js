@@ -15,17 +15,13 @@ export default function Home() {
 
   const [url, setUrl] = useState("");
   const [done, setDone] = useState(false);
-
-  // UPDATED
-  const [checkedPages, setCheckedPages] = useState(0);
-  const [checkedLinks, setCheckedLinks] = useState(0);
-
-  const [sitemap, setSitemap] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [startTime, setStartTime] = useState(null);
   const [currentPage, setCurrentPage] = useState("");
   const [brokenLinks, setBrokenLinks] = useState([]);
+  const [checkedPages, setCheckedPages] = useState(0);
+  const [checkedLinks, setCheckedLinks] = useState(0);
   const [scanIdReady, setScanIdReady] = useState(false);
   const [modalVisible, setFilterModalVisible] = useState(false);
 
@@ -63,7 +59,6 @@ export default function Home() {
     },
   ]);
 
-  // save scanId once
   useEffect(() => {
     let existingScanId = sessionStorage.getItem("scanId");
 
@@ -76,7 +71,6 @@ export default function Home() {
     setScanIdReady(true);
   }, []);
 
-  // restore state after reload
   useEffect(() => {
     if (!scanIdReady) return;
 
@@ -89,10 +83,8 @@ export default function Home() {
         if (!data) return;
 
         setUrl(data.url || "");
-        setSitemap(Boolean(data.options?.sitemap));
 
         const restoredOptions = { ...(data.options || {}) };
-        delete restoredOptions.sitemap;
 
         // FIXED
         setFilters((prev) =>
@@ -140,7 +132,6 @@ export default function Home() {
       if (msg.scanId !== scanIdRef.current) return;
 
       if (msg.type === "progress") {
-        // UPDATED
         setCheckedPages(msg.checkedPages || 0);
         setCheckedLinks(msg.checkedLinks || 0);
         setCurrentPage(msg.currentPage || "");
@@ -170,12 +161,9 @@ export default function Home() {
     };
   }, [scanIdReady]);
 
-  // UPDATED → speed should use checkedLinks
   const speed = useMemo(() => {
     if (!startTime) return 0;
-
     const seconds = (Date.now() - startTime) / 1000;
-
     return seconds ? (checkedLinks / seconds).toFixed(1) : 0;
   }, [checkedLinks, startTime]);
 
@@ -203,7 +191,13 @@ export default function Home() {
         className="text-blue-600 cursor-pointer hover:underline"
         title="Click to copy and open"
         onClick={() => {
-          navigator.clipboard.writeText(row.text);
+          let path = row.url;
+          try {
+            const u = new URL(row.url);
+            path = u.pathname + u.search;
+          } catch {}
+
+          navigator.clipboard.writeText(row?.text || path);
           window.open(row.source, "_blank", "noopener,noreferrer");
         }}
       >
@@ -212,12 +206,10 @@ export default function Home() {
     );
   };
 
-  // start scan
   const startScan = async () => {
     try {
       setLoading(true);
 
-      // UPDATED
       setCheckedPages(0);
       setCheckedLinks(0);
 
@@ -241,10 +233,7 @@ export default function Home() {
         body: JSON.stringify({
           url,
           scanId: scanIdRef.current,
-          options: {
-            ...filtersPayLoad,
-            sitemap,
-          },
+          options: filtersPayLoad,
         }),
       });
     } catch (error) {
@@ -284,6 +273,7 @@ export default function Home() {
     });
 
     // UPDATED
+    setUrl("");
     setCheckedPages(0);
     setCheckedLinks(0);
 
@@ -308,10 +298,39 @@ export default function Home() {
     );
   };
 
+  const handleDownloadClick = () => {
+    if (!brokenLinks?.length || !dt.current) return;
+
+    const headers = Object.keys(brokenLinks[0]);
+
+    const rows = [
+      headers,
+      ...brokenLinks.map((item) => headers.map((key) => item[key] || "")),
+    ];
+
+    const csvContent = rows
+      .map((row) =>
+        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
+      )
+      .join("\n");
+
+    const blob = new Blob([csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const fileUrl = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = fileUrl;
+    link.download = "broken-links.csv";
+    link.click();
+
+    URL.revokeObjectURL(fileUrl);
+  };
+
   return (
     <>
       <div className="grid grid-cols-[280px_1fr] bg-linear-to-br from-slate-50 to-blue-50">
-        {/* Sidebar */}
         <div className="flex flex-col gap-4 p-5 sticky top-0 border-r bg-white/80 backdrop-blur-md">
           {[
             {
@@ -358,7 +377,6 @@ export default function Home() {
           ))}
         </div>
 
-        {/* Table */}
         <div className="h-screen">
           <DataTable
             ref={dt}
@@ -369,9 +387,9 @@ export default function Home() {
             scrollHeight="flex"
             value={brokenLinks}
             header={
-              <header className="flex gap-4 bg-white flex-wrap">
+              <header className="flex gap-4 bg-white">
                 {loading ? (
-                  <div className="flex px-4 items-center grow border rounded max-w-[400px] overflow-hidden">
+                  <div className="flex px-4 items-center w-[400px] border rounded overflow-hidden">
                     <span className="font-medium whitespace-nowrap overflow-hidden text-ellipsis block">
                       {currentPage.replace(siteDomain, "")}
                     </span>
@@ -421,7 +439,7 @@ export default function Home() {
                             "Content-Type": "application/json",
                           },
                           body: JSON.stringify({
-                            action: paused ? "resume" : "pause",
+                            action: paused ? "pause" : "resume",
                             scanId: scanIdRef.current,
                           }),
                         });
@@ -449,19 +467,10 @@ export default function Home() {
                   />
                 )}
 
-                {!loading && !done && (
-                  <ToggleButton
-                    checked={sitemap}
-                    disabled={loading}
-                    onLabel="🗺️ Scan from Sitemap"
-                    offLabel="🌐 Crawl Website Pages"
-                    onChange={(e) => setSitemap(e.value)}
-                  />
-                )}
-
                 {brokenLinks?.length > 0 && (
                   <Button
                     outlined
+                    onClick={handleDownloadClick}
                     className="w-36"
                     label="Download"
                     icon="pi pi-download"
@@ -488,6 +497,7 @@ export default function Home() {
               header={() => {
                 return <div className="text-nowrap">📝 Anchor Text</div>;
               }}
+              body={(e) => e?.text?.replace(siteDomain, "")}
             />
 
             <Column
@@ -516,6 +526,23 @@ export default function Home() {
         visible={modalVisible}
         style={{ width: "50vw" }}
         onHide={() => setFilterModalVisible(false)}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              label="Cancel"
+              severity="secondary"
+              outlined
+              onClick={() => setFilterModalVisible(false)}
+            />
+            <Button
+              label="Apply Filters"
+              onClick={() => {
+                // handle apply logic here
+                setFilterModalVisible(false);
+              }}
+            />
+          </div>
+        }
       >
         <div className="grid gap-4">
           {filters.map((item) => {

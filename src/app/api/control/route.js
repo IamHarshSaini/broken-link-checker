@@ -29,8 +29,11 @@ export async function POST(req) {
 
     // reset
     if (action === "reset") {
+      scan.url = "";
       scan.checkedPages = 0;
       scan.checkedLinks = 0;
+
+      scan.options = {};
 
       scan.currentPage = "";
       scan.brokenLinks = [];

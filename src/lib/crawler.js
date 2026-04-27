@@ -77,10 +77,7 @@ async function getSitemapUrls(startUrl, options = {}) {
         if (!loc) continue;
 
         // recursive nested sitemap support
-        if (
-          loc.includes("sitemap") &&
-          (loc.endsWith(".xml") || loc.includes(".xml?"))
-        ) {
+        if (loc.includes(".xml")) {
           await crawlSitemap(loc);
         } else {
           if (shouldVisit(loc, options)) {
@@ -110,11 +107,9 @@ export async function runCrawler(startUrl, scanId, options = {}) {
 
   const baseHost = new URL(startUrl).host;
 
-  /**
-   * if sitemap=true
-   * use only sitemap URLs
-   */
-  if (options?.sitemap) {
+  const sitemap = startUrl?.endsWith(".xml") || startUrl?.includes(".xml?");
+
+  if (sitemap) {
     queue = await getSitemapUrls(startUrl, options);
   } else {
     queue = [startUrl];
@@ -126,7 +121,6 @@ export async function runCrawler(startUrl, scanId, options = {}) {
     if (!scan) break;
     if (scan.stopped) break;
 
-    // pause handling
     while (scan.paused) {
       await new Promise((r) => setTimeout(r, 500));
 
@@ -174,24 +168,30 @@ export async function runCrawler(startUrl, scanId, options = {}) {
     const $ = cheerio.load(html);
     const links = [];
 
-    /**
-     * capture:
-     * - link URL
-     * - anchor text
-     */
     $("a[href]").each((_, el) => {
       const href = $(el).attr("href");
       if (!href || href.startsWith("#")) return;
       try {
-        const text = $(el)
-          .contents()
-          .filter((_, node) => node.type === "text")
-          .text()
-          .trim();
+        let text = $(el).clone().children().remove().end().text().trim();
+
+        if (!text) {
+          text =
+            $(el)
+              .children()
+              .toArray()
+              .map((child) =>
+                $(child)
+                  .contents()
+                  .filter((_, node) => node.type === "text")
+                  .text()
+                  .trim(),
+              )
+              .find((txt) => /[a-zA-Z]/.test(txt)) || "";
+        }
 
         links.push({
           url: new URL(href, page).href,
-          text,
+          text: text,
         });
       } catch {}
     });
@@ -211,7 +211,6 @@ export async function runCrawler(startUrl, scanId, options = {}) {
                 validateStatus: () => true,
               });
 
-              // link checked
               checkedLinks++;
 
               updateScan(scanId, {
@@ -222,7 +221,7 @@ export async function runCrawler(startUrl, scanId, options = {}) {
               if (res.status >= 400) {
                 const broken = {
                   url: link,
-                  text: linkText, // anchor text
+                  text: linkText,
                   status: res.status,
                   source: page,
                 };
@@ -244,7 +243,7 @@ export async function runCrawler(startUrl, scanId, options = {}) {
 
               const broken = {
                 url: link,
-                text: linkText, // anchor text
+                text: linkText,
                 status: "ERROR",
                 source: page,
               };
@@ -258,10 +257,7 @@ export async function runCrawler(startUrl, scanId, options = {}) {
             }
           }
 
-          /**
-           * only normal crawl when sitemap=false
-           */
-          if (!options?.sitemap) {
+          if (!sitemap) {
             try {
               const host = new URL(link).host;
 
