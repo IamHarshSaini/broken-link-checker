@@ -1,8 +1,28 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #080c14;
+  --foreground: #e2e8f0;
+
+  /* Override PrimeReact lara-dark-blue surfaces to match design palette */
+  --surface-a: #131929;
+  --surface-b: #0d1221;
+  --surface-c: #1a2035;
+  --surface-d: rgba(255, 255, 255, 0.07);
+  --surface-e: #131929;
+  --surface-f: #0d1221;
+  --text-color: #e2e8f0;
+  --text-color-secondary: #94a3b8;
+  --primary-50: #eff6ff;
+  --primary-100: #dbeafe;
+  --primary-200: #bfdbfe;
+  --primary-300: #93c5fd;
+  --primary-400: #60a5fa;
+  --primary-500: #3b82f6;
+  --primary-600: #2563eb;
+  --primary-700: #1d4ed8;
+  --primary-color: #3b82f6;
+  --primary-color-text: #ffffff;
 }
 
 @theme inline {
@@ -14,10 +34,152 @@
 
 * {
   box-sizing: border-box;
-  scroll-behavior: smooth;
 }
 
-.border,
-.border-r {
-  border-color: #d2d5dc;
+/* Scan progress shimmer animation */
+@keyframes scan-bar {
+  0% { transform: translateX(-300%); }
+  100% { transform: translateX(500%); }
+}
+
+.animate-scan-bar {
+  animation: scan-bar 2s ease-in-out infinite;
+}
+
+/* Slim dark scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* PrimeReact DataTable dark overrides */
+.p-datatable .p-datatable-thead > tr > th {
+  background: #0d1221 !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+  color: #94a3b8 !important;
+  font-size: 0.7rem !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.07em !important;
+  padding: 0.65rem 1rem !important;
+}
+
+.p-datatable .p-datatable-tbody > tr {
+  background: transparent !important;
+  border-color: rgba(255, 255, 255, 0.04) !important;
+  transition: background 0.12s;
+}
+
+.p-datatable .p-datatable-tbody > tr:hover {
+  background: rgba(255, 255, 255, 0.025) !important;
+}
+
+.p-datatable .p-datatable-tbody > tr > td {
+  border-color: rgba(255, 255, 255, 0.04) !important;
+  padding: 0.6rem 1rem !important;
+}
+
+.p-datatable .p-paginator-bottom {
+  background: #0d1221 !important;
+  border-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.p-paginator {
+  background: #0d1221 !important;
+  color: #94a3b8 !important;
+}
+
+.p-paginator .p-paginator-pages .p-paginator-page.p-highlight {
+  background: #2563eb !important;
+  color: #fff !important;
+}
+
+.p-column-filter-overlay {
+  background: #131929 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 0.75rem !important;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Dialog */
+.p-dialog {
+  background: #0d1221 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 1rem !important;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6) !important;
+}
+
+.p-dialog .p-dialog-header {
+  background: #0d1221 !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 1rem 1rem 0 0 !important;
+  color: #e2e8f0 !important;
+}
+
+.p-dialog .p-dialog-content {
+  background: #0d1221 !important;
+  color: #e2e8f0 !important;
+}
+
+.p-dialog .p-dialog-footer {
+  background: #0d1221 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 0 0 1rem 1rem !important;
+}
+
+/* Chips (tag input) */
+.p-chips .p-chips-multiple-container {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 0.5rem !important;
+}
+
+.p-chips .p-chips-multiple-container:focus-within {
+  border-color: rgba(59, 130, 246, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1) !important;
+}
+
+.p-chips .p-chips-token {
+  background: rgba(59, 130, 246, 0.15) !important;
+  color: #93c5fd !important;
+  border-radius: 0.375rem !important;
+}
+
+/* InputNumber & InputText */
+.p-inputtext {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 0.5rem !important;
+  color: #e2e8f0 !important;
+}
+
+.p-inputtext:focus {
+  border-color: rgba(59, 130, 246, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1) !important;
+}
+
+.p-inputnumber-button {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #94a3b8 !important;
+}
+
+.p-inputnumber-button:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Mask overlay */
+.p-component-overlay {
+  background: rgba(0, 0, 0, 0.7) !important;
+  backdrop-filter: blur(4px);
 }

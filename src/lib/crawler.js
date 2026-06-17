@@ -3,7 +3,6 @@ import * as cheerio from "cheerio";
 import pLimit from "p-limit";
 
 import { getScan, updateScan, addBroken, finishScan } from "./scanStore";
-
 import { broadcastToScan } from "./ws";
 
 function shouldVisit(url, options) {
@@ -35,12 +34,9 @@ async function getSitemapUrls(startUrl, options = {}) {
     try {
       const res = await axios.get(sitemapUrl, { timeout: 10000 });
       const xml = res.data;
+      const locs = [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) => m[1]?.trim());
 
-      const sitemapMatches = [...xml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) =>
-        m[1]?.trim(),
-      );
-
-      for (const loc of sitemapMatches) {
+      for (const loc of locs) {
         if (!loc) continue;
         if (loc.includes(".xml")) {
           await crawlSitemap(loc);
@@ -58,80 +54,224 @@ async function getSitemapUrls(startUrl, options = {}) {
 }
 
 /**
- * Check a single link. Tries HEAD first, falls back to GET on 405.
- * Retries once on network error to reduce false positives from transient failures.
+ * Maps a network error code to a human-readable category string.
  */
-async function checkLink(url) {
-  const attempt = async (method) =>
-    axios({
-      method,
-      url,
-      timeout: 10000,
-      validateStatus: () => true,
-      maxRedirects: 5,
-    });
+function classifyError(err) {
+  const code = err?.code;
+  if (code === "ECONNABORTED" || code === "ETIMEDOUT") return "TIMEOUT";
+  if (code === "ENOTFOUND") return "DNS_ERROR";
+  if (code === "ECONNREFUSED") return "CONN_REFUSED";
+  if (
+    code === "ERR_TLS_CERT_ALTNAME_INVALID" ||
+    code === "CERT_HAS_EXPIRED" ||
+    code === "UNABLE_TO_VERIFY_LEAF_SIGNATURE" ||
+    err?.message?.includes("certificate")
+  )
+    return "SSL_ERROR";
+  return "ERROR";
+}
 
-  try {
-    const res = await attempt("head");
+/**
+ * Checks a URL by manually following redirects one hop at a time.
+ * - Tries HEAD first; falls back to GET on 405.
+ * - Retries once on network failure before marking as error.
+ * - Returns status, response time, final URL (if redirected), and redirect count.
+ */
+async function checkLink(url, userAgent = "") {
+  const t0 = Date.now();
+  let current = url;
+  let redirectCount = 0;
 
-    // Some servers don't support HEAD — fall back to GET
-    if (res.status === 405) {
-      const getRes = await attempt("get");
-      return getRes.status;
+  const baseOpts = {
+    maxRedirects: 0,
+    validateStatus: () => true,
+    timeout: 10000,
+    ...(userAgent ? { headers: { "User-Agent": userAgent } } : {}),
+  };
+
+  const attempt = (method, u) => axios({ method, url: u, ...baseOpts });
+
+  for (let hop = 0; hop <= 10; hop++) {
+    let res;
+
+    try {
+      res = await attempt("head", current);
+    } catch (err) {
+      // HEAD failed — retry once with GET before giving up
+      try {
+        res = await attempt("get", current);
+      } catch (err2) {
+        return {
+          status: classifyError(err2),
+          responseTime: Date.now() - t0,
+          finalUrl: redirectCount > 0 ? current : undefined,
+          redirectCount,
+        };
+      }
     }
 
-    return res.status;
-  } catch {
-    // Retry once before reporting as ERROR
-    try {
-      const retryRes = await attempt("head");
+    // HEAD not supported by this server — fall back to GET
+    if (res.status === 405) {
+      try {
+        res = await attempt("get", current);
+      } catch (err) {
+        return {
+          status: classifyError(err),
+          responseTime: Date.now() - t0,
+          finalUrl: redirectCount > 0 ? current : undefined,
+          redirectCount,
+        };
+      }
+    }
 
-      if (retryRes.status === 405) {
-        const getRes = await attempt("get");
-        return getRes.status;
+    // Follow redirect manually so we can record the chain
+    if (res.status >= 300 && res.status < 400 && res.headers?.location) {
+      try {
+        current = new URL(res.headers.location, current).href;
+        redirectCount++;
+        continue;
+      } catch {
+        // Malformed Location header — report the 3xx as the final status
+        return {
+          status: res.status,
+          responseTime: Date.now() - t0,
+          finalUrl: redirectCount > 0 ? current : undefined,
+          redirectCount,
+        };
+      }
+    }
+
+    return {
+      status: res.status,
+      responseTime: Date.now() - t0,
+      finalUrl: redirectCount > 0 ? current : undefined,
+      redirectCount,
+    };
+  }
+
+  // Guard against infinite redirect loops
+  return {
+    status: "REDIRECT_LOOP",
+    responseTime: Date.now() - t0,
+    finalUrl: current,
+    redirectCount,
+  };
+}
+
+/**
+ * Extracts all checkable resources from a loaded cheerio page.
+ * Always extracts <a href> links.
+ * Optionally extracts <img src>, <script src>, <link rel="stylesheet">.
+ */
+function extractResources($, pageUrl, checkResources = true) {
+  const items = [];
+
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href");
+    if (
+      !href ||
+      href.startsWith("#") ||
+      href.startsWith("mailto:") ||
+      href.startsWith("tel:") ||
+      href.startsWith("javascript:")
+    )
+      return;
+
+    try {
+      let text = $(el).clone().children().remove().end().text().trim();
+
+      if (!text) {
+        text =
+          $(el)
+            .children()
+            .toArray()
+            .map((child) =>
+              $(child)
+                .contents()
+                .filter((_, node) => node.type === "text")
+                .text()
+                .trim(),
+            )
+            .find((t) => /[a-zA-Z]/.test(t)) || "";
       }
 
-      return retryRes.status;
-    } catch {
-      return "ERROR";
-    }
-  }
+      items.push({ url: new URL(href, pageUrl).href, text, type: "link" });
+    } catch {}
+  });
+
+  if (!checkResources) return items;
+
+  $("img[src]").each((_, el) => {
+    const src = $(el).attr("src");
+    if (!src || src.startsWith("data:")) return;
+    try {
+      items.push({
+        url: new URL(src, pageUrl).href,
+        text: $(el).attr("alt") || "",
+        type: "image",
+      });
+    } catch {}
+  });
+
+  $("script[src]").each((_, el) => {
+    const src = $(el).attr("src");
+    if (!src) return;
+    try {
+      items.push({ url: new URL(src, pageUrl).href, text: "", type: "script" });
+    } catch {}
+  });
+
+  $('link[rel="stylesheet"][href]').each((_, el) => {
+    const href = $(el).attr("href");
+    if (!href) return;
+    try {
+      items.push({ url: new URL(href, pageUrl).href, text: "", type: "style" });
+    } catch {}
+  });
+
+  return items;
 }
 
 export async function runCrawler(startUrl, scanId, options = {}) {
   const checkedLinksSet = new Set();
   const visitedPages = new Set();
 
+  // Queue items: { url, depth }
   let queue = [];
   let checkedPages = 0;
   let checkedLinks = 0;
+  let redirectedCount = 0;
 
   const concurrency = Math.min(Math.max(Number(options.concurrency) || 10, 1), 50);
+  const maxDepth = Number(options.maxDepth) || 0; // 0 = unlimited
+  const crawlDelay = Number(options.crawlDelay) || 0; // ms between page fetches
+  const userAgent = options.userAgent?.trim() || "";
+  const checkExternal = options.checkExternal !== false; // default: true
+  const checkResources = options.checkResources !== false; // default: true
+
   const limit = pLimit(concurrency);
 
   const baseHost = new URL(startUrl).host;
   const sitemap = startUrl.endsWith(".xml") || startUrl.includes(".xml?");
 
   if (sitemap) {
-    queue = await getSitemapUrls(startUrl, options);
+    const urls = await getSitemapUrls(startUrl, options);
+    queue = urls.map((u) => ({ url: u, depth: 0 }));
   } else {
-    queue = [startUrl];
+    queue = [{ url: startUrl, depth: 0 }];
   }
 
   while (queue.length) {
     const scan = getScan(scanId);
-
-    if (!scan) break;
-    if (scan.stopped) break;
+    if (!scan || scan.stopped) break;
 
     while (scan.paused) {
       await new Promise((r) => setTimeout(r, 500));
-
       const latest = getScan(scanId);
       if (!latest || latest.stopped) break;
     }
 
-    const page = queue.shift();
+    const { url: page, depth } = queue.shift() || {};
 
     if (!page) continue;
     if (visitedPages.has(page)) continue;
@@ -141,104 +281,112 @@ export async function runCrawler(startUrl, scanId, options = {}) {
     checkedPages++;
 
     updateScan(scanId, { checkedPages, checkedLinks, currentPage: page });
-
-    broadcastToScan(scanId, {
-      type: "progress",
-      checkedPages,
-      checkedLinks,
-      currentPage: page,
-    });
+    broadcastToScan(scanId, { type: "progress", checkedPages, checkedLinks, currentPage: page, redirectedCount });
 
     let html = "";
 
     try {
-      const res = await axios.get(page, { timeout: 10000 });
+      const res = await axios.get(page, {
+        timeout: 10000,
+        ...(userAgent ? { headers: { "User-Agent": userAgent } } : {}),
+      });
       html = res.data;
     } catch {
       continue;
     }
 
     const $ = cheerio.load(html);
-    const links = [];
-
-    $("a[href]").each((_, el) => {
-      const href = $(el).attr("href");
-      if (!href || href.startsWith("#")) return;
-      try {
-        let text = $(el).clone().children().remove().end().text().trim();
-
-        if (!text) {
-          text =
-            $(el)
-              .children()
-              .toArray()
-              .map((child) =>
-                $(child)
-                  .contents()
-                  .filter((_, node) => node.type === "text")
-                  .text()
-                  .trim(),
-              )
-              .find((txt) => /[a-zA-Z]/.test(txt)) || "";
-        }
-
-        links.push({ url: new URL(href, page).href, text });
-      } catch {}
-    });
+    const resources = extractResources($, page, checkResources);
 
     await Promise.all(
-      links.map((item) =>
+      resources.map((item) =>
         limit(async () => {
-          // Bail out mid-batch if scan was stopped
           const currentScan = getScan(scanId);
           if (!currentScan || currentScan.stopped) return;
 
           const link = item.url;
           const linkText = item.text || "";
+          const linkType = item.type;
+
+          // Skip external resources when option is off
+          if (!checkExternal) {
+            try {
+              if (new URL(link).host !== baseHost) return;
+            } catch {
+              return;
+            }
+          }
 
           if (!checkedLinksSet.has(link)) {
             checkedLinksSet.add(link);
 
-            const status = await checkLink(link);
+            const result = await checkLink(link, userAgent);
             checkedLinks++;
 
-            updateScan(scanId, { checkedPages, checkedLinks });
+            const isBroken =
+              result.status === "ERROR" ||
+              result.status === "TIMEOUT" ||
+              result.status === "DNS_ERROR" ||
+              result.status === "CONN_REFUSED" ||
+              result.status === "SSL_ERROR" ||
+              result.status === "REDIRECT_LOOP" ||
+              (typeof result.status === "number" && result.status >= 400);
 
+            if (!isBroken && result.redirectCount > 0) {
+              redirectedCount++;
+            }
+
+            updateScan(scanId, { checkedPages, checkedLinks, redirectedCount });
             broadcastToScan(scanId, {
               type: "progress",
               checkedPages,
               checkedLinks,
               currentPage: page,
+              redirectedCount,
             });
 
-            if (status === "ERROR" || (typeof status === "number" && status >= 400)) {
-              const broken = { url: link, text: linkText, status, source: page };
+            if (isBroken) {
+              const broken = {
+                url: link,
+                text: linkText,
+                type: linkType,
+                status: result.status,
+                finalUrl: result.finalUrl,
+                redirectCount: result.redirectCount,
+                responseTime: result.responseTime,
+                source: page,
+              };
 
               addBroken(scanId, broken);
-
               broadcastToScan(scanId, { type: "broken", data: broken });
             }
           }
 
-          if (!sitemap) {
+          // Only crawl deeper for internal <a href> links
+          if (!sitemap && linkType === "link") {
             try {
               const host = new URL(link).host;
+              const withinDepth = !maxDepth || depth < maxDepth;
 
               if (
                 host === baseHost &&
                 !visitedPages.has(link) &&
-                shouldVisit(link, options)
+                shouldVisit(link, options) &&
+                withinDepth
               ) {
-                queue.push(link);
+                queue.push({ url: link, depth: depth + 1 });
               }
             } catch {}
           }
         }),
       ),
     );
+
+    if (crawlDelay > 0) {
+      await new Promise((r) => setTimeout(r, crawlDelay));
+    }
   }
 
   finishScan(scanId);
-
   broadcastToScan(scanId, { type: "done" });
 }

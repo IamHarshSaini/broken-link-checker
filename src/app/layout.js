@@ -3,7 +3,7 @@ import "primeicons/primeicons.css";
 import Provider from "@/redux/Provider";
 import "primereact/resources/primereact.min.css";
 import { Geist, Geist_Mono } from "next/font/google";
-import "primereact/resources/themes/lara-light-blue/theme.css";
+import "primereact/resources/themes/lara-dark-blue/theme.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",

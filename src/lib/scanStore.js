@@ -8,6 +8,7 @@ export function createScan(scanId, url, options) {
 
     checkedPages: 0,
     checkedLinks: 0,
+    redirectedCount: 0,
 
     currentPage: "",
     brokenLinks: [],

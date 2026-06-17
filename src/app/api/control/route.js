@@ -32,6 +32,7 @@ export async function POST(req) {
       scan.url = "";
       scan.checkedPages = 0;
       scan.checkedLinks = 0;
+      scan.redirectedCount = 0;
 
       scan.options = {};
 
@@ -45,6 +46,7 @@ export async function POST(req) {
       scan.stopped = false;
 
       scan.createdAt = Date.now();
+      scan.finishedAt = null;
     }
 
     return Response.json({ ok: true });
