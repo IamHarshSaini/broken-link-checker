@@ -15,6 +15,8 @@ export function createScan(scanId, url, options) {
     loading: true,
     paused: false,
     stopped: false,
+    createdAt: Date.now(),
+    finishedAt: null,
   });
 }
 
@@ -45,4 +47,5 @@ export function finishScan(scanId) {
 
   existing.done = true;
   existing.loading = false;
+  existing.finishedAt = Date.now();
 }
