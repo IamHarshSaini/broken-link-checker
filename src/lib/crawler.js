@@ -2,8 +2,8 @@ import axios from "axios";
 import * as cheerio from "cheerio";
 import pLimit from "p-limit";
 
-import { getScan, updateScan, addBroken, finishScan } from "./scanStore";
-import { broadcastToScan } from "./ws";
+import { getScan, updateScan, addBroken, finishScan } from "./scanStore.js";
+import { broadcastToScan } from "./ws.js";
 
 function shouldVisit(url, options) {
   if (!options) return true;
@@ -21,6 +21,58 @@ function shouldVisit(url, options) {
   if (urlIncludes.length > 0 && !urlIncludes.some((p) => url.includes(p))) return false;
 
   return true;
+}
+
+const robotsCache = new Map();
+
+/**
+ * Extracts Disallow rules for the "*" user-agent from robots.txt text.
+ */
+function parseRobotsTxt(text) {
+  const disallow = [];
+  let applies = false;
+
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const [rawKey, ...rest] = line.split(":");
+    const key = rawKey.trim().toLowerCase();
+    const value = rest.join(":").trim();
+
+    if (key === "user-agent") {
+      applies = value === "*";
+    } else if (applies && key === "disallow" && value) {
+      disallow.push(value);
+    }
+  }
+
+  return disallow;
+}
+
+/**
+ * Fetches and caches robots.txt Disallow rules per origin.
+ */
+async function getRobotsRules(origin) {
+  if (robotsCache.has(origin)) return robotsCache.get(origin);
+
+  const promise = axios
+    .get(`${origin}/robots.txt`, { timeout: 5000, validateStatus: () => true })
+    .then((res) => (res.status === 200 && typeof res.data === "string" ? parseRobotsTxt(res.data) : []))
+    .catch(() => []);
+
+  robotsCache.set(origin, promise);
+  return promise;
+}
+
+async function isBlockedByRobots(url) {
+  try {
+    const { origin, pathname } = new URL(url);
+    const rules = await getRobotsRules(origin);
+    return rules.some((rule) => pathname.startsWith(rule));
+  } catch {
+    return false;
+  }
 }
 
 async function getSitemapUrls(startUrl, options = {}) {
@@ -159,6 +211,21 @@ async function checkLink(url, userAgent = "") {
 }
 
 /**
+ * Posts a scan summary to a Slack-compatible incoming webhook.
+ * The `text` field renders in Slack; the rest is available to generic receivers.
+ */
+async function notifyWebhook(webhookUrl, summary) {
+  const word = summary.brokenCount === 1 ? "broken link" : "broken links";
+  const text = `🔗 Scan finished for ${summary.url}: ${summary.checkedPages} pages, ${summary.checkedLinks} links checked, ${summary.brokenCount} ${word} found.`;
+
+  try {
+    await axios.post(webhookUrl, { text, ...summary }, { timeout: 10000 });
+  } catch (err) {
+    console.log("webhook notify failed:", err.message);
+  }
+}
+
+/**
  * Extracts all checkable resources from a loaded cheerio page.
  * Always extracts <a href> links.
  * Optionally extracts <img src>, <script src>, <link rel="stylesheet">.
@@ -248,6 +315,7 @@ export async function runCrawler(startUrl, scanId, options = {}) {
   const userAgent = options.userAgent?.trim() || "";
   const checkExternal = options.checkExternal !== false; // default: true
   const checkResources = options.checkResources !== false; // default: true
+  const respectRobotsTxt = options.respectRobotsTxt !== false; // default: true
 
   const limit = pLimit(concurrency);
 
@@ -276,6 +344,7 @@ export async function runCrawler(startUrl, scanId, options = {}) {
     if (!page) continue;
     if (visitedPages.has(page)) continue;
     if (!shouldVisit(page, options)) continue;
+    if (respectRobotsTxt && (await isBlockedByRobots(page))) continue;
 
     visitedPages.add(page);
     checkedPages++;
@@ -389,4 +458,13 @@ export async function runCrawler(startUrl, scanId, options = {}) {
 
   finishScan(scanId);
   broadcastToScan(scanId, { type: "done" });
+
+  if (options.webhookUrl) {
+    notifyWebhook(options.webhookUrl, {
+      url: startUrl,
+      checkedPages,
+      checkedLinks,
+      brokenCount: getScan(scanId)?.brokenLinks?.length || 0,
+    });
+  }
 }
