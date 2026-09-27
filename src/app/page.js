@@ -69,6 +69,9 @@ export default function Home() {
   const [userAgent, setUserAgent] = useState("");
   const [checkExternal, setCheckExternal] = useState(true);
   const [checkResources, setCheckResources] = useState(true);
+  const [respectRobotsTxt, setRespectRobotsTxt] = useState(true);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [groupBySource, setGroupBySource] = useState(false);
 
   const siteDomain = useMemo(() => {
     if (!url) return "";
@@ -113,6 +116,8 @@ export default function Home() {
         if (o.userAgent) setUserAgent(o.userAgent);
         if (o.checkExternal !== undefined) setCheckExternal(Boolean(o.checkExternal));
         if (o.checkResources !== undefined) setCheckResources(Boolean(o.checkResources));
+        if (o.respectRobotsTxt !== undefined) setRespectRobotsTxt(Boolean(o.respectRobotsTxt));
+        if (o.webhookUrl) setWebhookUrl(o.webhookUrl);
         setCheckedPages(data.checkedPages || 0);
         setCheckedLinks(data.checkedLinks || 0);
         setRedirectedCount(data.redirectedCount || 0);
@@ -235,7 +240,17 @@ export default function Home() {
 
   const buildOptions = () => {
     const fp = filters.reduce((acc, item) => ({ ...acc, [item.key]: item.value }), {});
-    return { ...fp, concurrency, maxDepth, crawlDelay, userAgent, checkExternal, checkResources };
+    return {
+      ...fp,
+      concurrency,
+      maxDepth,
+      crawlDelay,
+      userAgent,
+      checkExternal,
+      checkResources,
+      respectRobotsTxt,
+      ...(webhookUrl.trim() ? { webhookUrl: webhookUrl.trim() } : {}),
+    };
   };
 
   const startScan = async () => {
@@ -289,6 +304,7 @@ export default function Home() {
     setStartTime(null); setEndTime(null); setElapsed(0);
     setConcurrency(10); setMaxDepth(0); setCrawlDelay(0);
     setUserAgent(""); setCheckExternal(true); setCheckResources(true);
+    setRespectRobotsTxt(true); setWebhookUrl("");
   };
 
   const handleDownloadClick = () => {
@@ -324,6 +340,43 @@ export default function Home() {
     () => Math.max(...statusBreakdown.map(([, c]) => c), 1),
     [statusBreakdown],
   );
+
+  const groupCounts = useMemo(() => {
+    const m = new Map();
+    for (const l of brokenLinks) m.set(l.source, (m.get(l.source) || 0) + 1);
+    return m;
+  }, [brokenLinks]);
+
+  const tableRows = useMemo(() => {
+    if (!groupBySource) return brokenLinks;
+    return [...brokenLinks].sort((a, b) => a.source.localeCompare(b.source));
+  }, [brokenLinks, groupBySource]);
+
+  const sourceGroupHeader = (row) => {
+    let path = row.source;
+    try {
+      const u = new URL(row.source);
+      path = (u.pathname + u.search) || "/";
+    } catch {}
+    const count = groupCounts.get(row.source) || 0;
+    return (
+      <div className="flex items-center gap-2 py-0.5">
+        <i className="pi pi-file text-slate-500 text-xs" />
+        <span className="text-sm text-slate-300 font-medium truncate">{path}</span>
+        <span className="text-xs text-slate-600">
+          ({count} broken)
+        </span>
+        <a
+          href={row.source}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-500 hover:text-blue-400 text-xs"
+        >
+          ↗
+        </a>
+      </div>
+    );
+  };
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -581,6 +634,21 @@ export default function Home() {
               </button>
             )}
 
+            {/* Group by page */}
+            {brokenLinks?.length > 0 && (
+              <button
+                onClick={() => setGroupBySource((v) => !v)}
+                className={`h-9 px-3.5 rounded-lg border text-sm transition-all flex items-center gap-2 shrink-0 ${
+                  groupBySource
+                    ? "border-blue-500/40 bg-blue-950/40 text-blue-300"
+                    : "border-white/8 bg-white/[0.03] text-slate-400 hover:bg-white/6 hover:text-slate-200"
+                }`}
+              >
+                <i className="pi pi-objects-column text-xs" />
+                Group by page
+              </button>
+            )}
+
             {/* Export */}
             {brokenLinks?.length > 0 && (
               <button
@@ -609,7 +677,14 @@ export default function Home() {
               scrollable
               size="small"
               scrollHeight="flex"
-              value={brokenLinks}
+              value={tableRows}
+              {...(groupBySource
+                ? {
+                    rowGroupMode: "subheader",
+                    groupRowsBy: "source",
+                    rowGroupHeaderTemplate: sourceGroupHeader,
+                  }
+                : {})}
               emptyMessage={
                 <div className="flex flex-col items-center gap-4 py-24 text-slate-600">
                   <div className="w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/5 flex items-center justify-center">
@@ -671,7 +746,9 @@ export default function Home() {
                 sortable
                 style={{ width: "90px" }}
               />
-              <Column field="source" header="Found On" body={sourceBody} />
+              {!groupBySource && (
+                <Column field="source" header="Found On" body={sourceBody} />
+              )}
             </DataTable>
           </div>
         </div>
@@ -794,6 +871,12 @@ export default function Home() {
                     checked: checkResources,
                     set: setCheckResources,
                   },
+                  {
+                    id: "robots",
+                    label: "Respect robots.txt",
+                    checked: respectRobotsTxt,
+                    set: setRespectRobotsTxt,
+                  },
                 ].map(({ id, label, checked, set }) => (
                   <label
                     key={id}
@@ -834,6 +917,25 @@ export default function Home() {
             />
             <p className="text-xs text-slate-600 mt-1.5">
               Sent with every request. Leave blank for default.
+            </p>
+          </div>
+
+          {/* Notifications */}
+          <div className="border-t border-white/5 pt-5">
+            <p className="text-xs font-semibold uppercase tracking-widest text-slate-600 mb-3">
+              Notifications
+            </p>
+            <label className="text-sm text-slate-300 mb-1.5 inline-block">
+              Webhook URL (Slack-compatible)
+            </label>
+            <InputText
+              value={webhookUrl}
+              onChange={(e) => setWebhookUrl(e.target.value)}
+              placeholder="https://hooks.slack.com/services/..."
+              className="w-full"
+            />
+            <p className="text-xs text-slate-600 mt-1.5">
+              Posted once when the scan finishes, with a summary and broken-link count.
             </p>
           </div>
         </div>

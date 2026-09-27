@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "scan": "node scripts/cli.mjs"
   },
   "dependencies": {
     "ws": "^8.20.0",
